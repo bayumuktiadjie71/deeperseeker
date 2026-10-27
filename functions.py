@@ -2016,8 +2016,29 @@ async def create_new_chat(auth_token):
         timeout=aiohttp.ClientTimeout(total=20),
     )
     async with response:
-        data = await response.json()
-    return data["data"]["biz_data"]["chat_session"]["id"]
+        try:
+            data = await response.json()
+        except (aiohttp.ContentTypeError, json.JSONDecodeError) as exc:
+            body = (await response.text())[:500]
+            raise UpstreamError(
+                response.status,
+                f"Chat session creation returned invalid JSON: {body or exc}",
+            ) from exc
+
+    try:
+        chat_id = data["data"]["biz_data"]["chat_session"]["id"]
+    except (TypeError, KeyError) as exc:
+        # Avoid logging or returning auth headers; the response body may include
+        # upstream diagnostics needed to identify auth or API changes.
+        detail = json.dumps(data, ensure_ascii=False)[:500]
+        raise UpstreamError(
+            response.status,
+            f"Chat session creation returned an unexpected response: {detail}",
+        ) from exc
+
+    if not chat_id:
+        raise UpstreamError(response.status, "Chat session response has no chat id")
+    return chat_id
 
 
 _EMPTY_SSE_DEFAULT = (
